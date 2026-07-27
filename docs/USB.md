@@ -5,12 +5,16 @@ Package **everything** for a bare-metal install onto one stick: Arch live enviro
 ## Overview
 
 ```
-Build host (Arch)                    Target server
-─────────────────                    ─────────────
+Build host (Arch)                         Target server
+─────────────────                         ─────────────
 iso/secrets/ (optional keys)
        │
        ▼
- sudo ./bin/build-iso  ──►  out/*.iso
+ ./bin/build-iso-docker   ──►  out/*.iso     (no host sudo; Docker)
+   # or: sudo ./bin/build-iso
+       │
+       ├── ./bin/verify-iso                  (static extract checks)
+       ├── ./bin/test-vm                     (QEMU KVM smoke, no sudo)
        │
        ▼
  sudo ./bin/make-usb /dev/sdX \
@@ -28,13 +32,33 @@ iso/secrets/ (optional keys)
 
 ## Build host setup
 
-On an Arch machine (your laptop is fine):
+### Rootless path (recommended for day-to-day)
+
+Needs **Docker** (user in `docker` group) and, for VM tests, QEMU + OVMF:
+
+```bash
+# one-time (you run sudo once for packages)
+sudo pacman -S --needed docker qemu-system-x86 edk2-ovmf \
+  squashfs-tools libisoburn
+# docker already running + your user in group docker
+```
+
+Then **no sudo** for build/test:
+
+```bash
+./bin/build-iso-docker    # privileged mkarchiso inside a container
+./bin/verify-iso
+./bin/test-vm             # KVM smoke; needs /dev/kvm readable
+```
+
+### Host mkarchiso path
 
 ```bash
 sudo pacman -S --needed archiso squashfs-tools libisoburn dosfstools mtools
+sudo ./bin/build-iso
 ```
 
-`mkarchiso` **requires root**.
+`mkarchiso` always needs root **somewhere** (host or container).
 
 Optional: bake SSH public keys into the image so bootstrap can harden SSH without a network clone:
 
@@ -52,12 +76,12 @@ $EDITOR iso/secrets/authorized_keys   # real public keys only
 
 ```bash
 cd ~/Ruby-on-Rails-Wizardry/arch-rails-server
-sudo ./bin/build-iso
+./bin/build-iso-docker
 # → out/arch-rails-server-YYYY.MM.DD-x86_64.iso
 # → out/arch-rails-server-latest.iso  (symlink)
 ```
 
-Useful flags:
+Useful flags (passed through to `build-iso`):
 
 | Flag | Meaning |
 |------|---------|
@@ -66,6 +90,16 @@ Useful flags:
 | `--work DIR` | Alternate work directory |
 
 Build time is dominated by package download/squashfs (often 10–30+ minutes depending on cache and CPU).
+
+## Test without bare metal
+
+```bash
+./bin/verify-iso     # extract airootfs; assert kit + ars present
+./bin/test-vm        # verify-iso + UEFI QEMU boot + `ars status` over serial
+./bin/test-vm --interactive   # manual serial console
+```
+
+Live media enables **serial console** (`ttyS0`) and root autologin on that getty so headless CI/VM checks work.
 
 ## Write the USB stick
 

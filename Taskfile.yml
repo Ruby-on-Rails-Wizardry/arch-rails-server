@@ -27,9 +27,24 @@ tasks:
       - ./bin/setup-remotes
 
   build-iso:
-    desc: Build live ISO (requires root + archiso)
+    desc: Build live ISO on host (requires root + archiso)
     cmds:
       - ./bin/build-iso
+
+  build-iso-docker:
+    desc: Build live ISO via Docker (no host sudo)
+    cmds:
+      - ./bin/build-iso-docker
+
+  verify-iso:
+    desc: Static checks on built ISO (no root)
+    cmds:
+      - ./bin/verify-iso
+
+  test-vm:
+    desc: verify-iso + QEMU smoke boot (no host sudo)
+    cmds:
+      - ./bin/test-vm {{.CLI_ARGS}}
 
   make-usb:
     desc: "Write ISO to USB — usage: task make-usb -- /dev/sdX --i-know-this-wipes-the-device"

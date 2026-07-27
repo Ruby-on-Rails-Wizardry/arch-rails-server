@@ -20,6 +20,9 @@ archinstall/user_configuration.json
 # ISO build artifacts
 out/
 work/
+scripts/__pycache__/
+__pycache__/
+*.pyc
 
 # Keys/env baked into live media at build time (never commit)
 iso/secrets/

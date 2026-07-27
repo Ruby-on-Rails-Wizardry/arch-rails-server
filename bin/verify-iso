@@ -1,0 +1,132 @@
+#!/usr/bin/env bash
+# Static checks on a built ISO (no root, no VM). Extracts airootfs and
+# asserts the kit and live helpers are present.
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ISO="${ISO:-}"
+WORK="${WORK:-${ROOT}/work/verify-iso}"
+KEEP=0
+
+usage() {
+  cat <<EOF
+Usage: $0 [--iso PATH] [--work DIR] [--keep]
+
+Verify out/*.iso contains /opt/arch-rails-server and live helpers.
+Uses bsdtar/xorriso + unsquashfs (no sudo).
+EOF
+}
+
+log() { printf '==> %s\n' "$*"; }
+die() { printf 'error: %s\n' "$*" >&2; exit 1; }
+pass() { printf 'PASS  %s\n' "$*"; }
+fail() { printf 'FAIL  %s\n' "$*"; failures=$((failures + 1)); }
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --iso) ISO="$2"; shift 2 ;;
+    --work) WORK="$2"; shift 2 ;;
+    --keep) KEEP=1; shift ;;
+    -h|--help) usage; exit 0 ;;
+    *) die "unknown option: $1" ;;
+  esac
+done
+
+command -v unsquashfs >/dev/null 2>&1 || die "unsquashfs required (squashfs-tools)"
+
+if [[ -z "${ISO}" ]]; then
+  if [[ -e "${ROOT}/out/arch-rails-server-latest.iso" ]]; then
+    ISO="${ROOT}/out/arch-rails-server-latest.iso"
+  else
+    shopt -s nullglob
+    c=("${ROOT}/out"/arch-rails-server-*.iso "${ROOT}/out"/*.iso)
+    shopt -u nullglob
+    [[ ${#c[@]} -gt 0 ]] || die "no ISO in ${ROOT}/out — run ./bin/build-iso-docker"
+    ISO="$(ls -t "${c[@]}" | head -1)"
+  fi
+fi
+ISO="$(readlink -f "${ISO}")"
+[[ -f "${ISO}" ]] || die "ISO not found: ${ISO}"
+
+failures=0
+log "ISO: ${ISO} ($(numfmt --to=iec "$(stat -c%s "${ISO}")"))"
+
+rm -rf "${WORK}"
+mkdir -p "${WORK}/extract" "${WORK}/squash"
+
+SFS_ISO_PATH="arch/x86_64/airootfs.sfs"
+SFS_FILE="${WORK}/extract/airootfs.sfs"
+
+log "extracting ${SFS_ISO_PATH}"
+if command -v bsdtar >/dev/null 2>&1; then
+  bsdtar -xf "${ISO}" -C "${WORK}/extract" "${SFS_ISO_PATH}"
+  # bsdtar preserves path under extract/
+  if [[ -f "${WORK}/extract/${SFS_ISO_PATH}" ]]; then
+    SFS_FILE="${WORK}/extract/${SFS_ISO_PATH}"
+  fi
+elif command -v xorriso >/dev/null 2>&1; then
+  xorriso -osirrox on -indev "${ISO}" -extract "/${SFS_ISO_PATH}" "${SFS_FILE}"
+else
+  die "need bsdtar or xorriso to extract from ISO"
+fi
+
+[[ -f "${SFS_FILE}" ]] || die "failed to extract airootfs.sfs (looked for ${SFS_FILE})"
+log "airootfs.sfs size: $(numfmt --to=iec "$(stat -c%s "${SFS_FILE}")")"
+
+log "unsquashfs (selective extract of kit paths)"
+unsquashfs -d "${WORK}/squash" -f "${SFS_FILE}" \
+  opt/arch-rails-server \
+  usr/local/bin/ars \
+  usr/local/bin/ars-copy-to-target \
+  etc/motd \
+  2>&1 | tail -30
+
+KIT="${WORK}/squash/opt/arch-rails-server"
+[[ -d "${KIT}" ]] && pass "opt/arch-rails-server present" || fail "opt/arch-rails-server missing"
+[[ -f "${KIT}/bin/bootstrap" ]] && pass "kit bin/bootstrap" || fail "kit bin/bootstrap"
+[[ -f "${KIT}/bin/verify" ]] && pass "kit bin/verify" || fail "kit bin/verify"
+[[ -f "${WORK}/squash/usr/local/bin/ars" ]] && pass "usr/local/bin/ars" || fail "usr/local/bin/ars"
+if [[ -f "${WORK}/squash/etc/motd" ]] && grep -q 'arch-rails-server' "${WORK}/squash/etc/motd"; then
+  pass "motd mentions arch-rails-server"
+else
+  fail "motd missing kit banner"
+fi
+if [[ -f "${KIT}/VERSION" ]]; then
+  pass "VERSION: $(tr '\n' ' ' <"${KIT}/VERSION")"
+else
+  fail "VERSION stamp missing"
+fi
+[[ -f "${KIT}/docs/USB.md" ]] && pass "docs/USB.md" || fail "docs/USB.md missing"
+[[ -f "${KIT}/bootstrap/bootstrap.sh" ]] && pass "bootstrap/bootstrap.sh" || fail "bootstrap missing"
+
+# Serial console boot options in ISO (not inside squashfs)
+if command -v bsdtar >/dev/null 2>&1; then
+  if bsdtar -xf "${ISO}" -O loader/entries/01-archiso-linux.conf 2>/dev/null | grep -q 'console=ttyS0'; then
+    pass "UEFI boot entry has console=ttyS0"
+  else
+    # path may differ
+    if bsdtar -tf "${ISO}" 2>/dev/null | grep -q 'loader/entries'; then
+      entry="$(bsdtar -tf "${ISO}" 2>/dev/null | grep 'loader/entries/01' | head -1 || true)"
+      if [[ -n "${entry}" ]] && bsdtar -xf "${ISO}" -O "${entry}" 2>/dev/null | grep -q 'console=ttyS0'; then
+        pass "UEFI boot entry has console=ttyS0 (${entry})"
+      else
+        fail "UEFI boot entry missing console=ttyS0"
+      fi
+    else
+      fail "no UEFI loader entries found in ISO"
+    fi
+  fi
+fi
+
+echo
+if [[ "${failures}" -eq 0 ]]; then
+  echo "verify-iso: all checks passed"
+  if [[ "${KEEP}" -ne 1 ]]; then
+    # squashfs extract may be root-owned/read-only bits
+    chmod -R u+w "${WORK}" 2>/dev/null || true
+    rm -rf "${WORK}" 2>/dev/null || true
+  fi
+  exit 0
+fi
+echo "verify-iso: ${failures} failure(s) (work kept at ${WORK})"
+exit 1

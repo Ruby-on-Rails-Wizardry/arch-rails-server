@@ -1,0 +1,158 @@
+#!/usr/bin/env bash
+# Boot the built ISO in QEMU (KVM) without sudo and smoke-test the live kit.
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ISO="${ISO:-}"
+WORK="${WORK:-${ROOT}/work/vm}"
+MEM="${MEM:-2048}"
+SMP="${SMP:-2}"
+BOOT_TIMEOUT="${BOOT_TIMEOUT:-300}"
+OVMF_CODE="${OVMF_CODE:-/usr/share/edk2/x64/OVMF_CODE.4m.fd}"
+OVMF_VARS_SRC="${OVMF_VARS_SRC:-/usr/share/edk2/x64/OVMF_VARS.4m.fd}"
+SKIP_VERIFY=0
+SKIP_BOOT=0
+INTERACTIVE=0
+
+usage() {
+  cat <<EOF
+Usage: $0 [options]
+
+Rootless ISO checks + QEMU smoke test (needs qemu-system-x86, edk2-ovmf, KVM).
+
+Options:
+  --iso PATH         ISO to boot (default: out/arch-rails-server-latest.iso)
+  --mem MB           Guest RAM (default: ${MEM})
+  --smp N            vCPUs (default: ${SMP})
+  --timeout SEC      Boot smoke timeout (default: ${BOOT_TIMEOUT})
+  --skip-verify      Do not run bin/verify-iso first
+  --skip-boot        Only verify-iso
+  --interactive      QEMU serial on stdio (manual)
+  -h, --help
+EOF
+}
+
+log() { printf '==> %s\n' "$*"; }
+die() { printf 'error: %s\n' "$*" >&2; exit 1; }
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --iso) ISO="$2"; shift 2 ;;
+    --mem) MEM="$2"; shift 2 ;;
+    --smp) SMP="$2"; shift 2 ;;
+    --timeout) BOOT_TIMEOUT="$2"; shift 2 ;;
+    --skip-verify) SKIP_VERIFY=1; shift ;;
+    --skip-boot) SKIP_BOOT=1; shift ;;
+    --interactive) INTERACTIVE=1; shift ;;
+    -h|--help) usage; exit 0 ;;
+    *) die "unknown option: $1" ;;
+  esac
+done
+
+if [[ -z "${ISO}" ]]; then
+  if [[ -e "${ROOT}/out/arch-rails-server-latest.iso" ]]; then
+    ISO="${ROOT}/out/arch-rails-server-latest.iso"
+  else
+    shopt -s nullglob
+    c=("${ROOT}/out"/arch-rails-server-*.iso)
+    shopt -u nullglob
+    [[ ${#c[@]} -gt 0 ]] || die "no ISO — run ./bin/build-iso-docker first"
+    ISO="$(ls -t "${c[@]}" | head -1)"
+  fi
+fi
+ISO="$(readlink -f "${ISO}")"
+[[ -f "${ISO}" ]] || die "ISO not found: ${ISO}"
+
+if [[ "${SKIP_VERIFY}" -eq 0 ]]; then
+  log "verify-iso"
+  "${ROOT}/bin/verify-iso" --iso "${ISO}"
+fi
+
+if [[ "${SKIP_BOOT}" -eq 1 ]]; then
+  log "skip-boot set; done"
+  exit 0
+fi
+
+command -v qemu-system-x86_64 >/dev/null 2>&1 || die "qemu-system-x86_64 missing (pacman -S qemu-system-x86)"
+[[ -r "${OVMF_CODE}" ]] || die "OVMF code missing: ${OVMF_CODE}"
+[[ -r "${OVMF_VARS_SRC}" ]] || die "OVMF vars missing: ${OVMF_VARS_SRC}"
+[[ -r /dev/kvm ]] || log "warning: /dev/kvm not readable; will use TCG (slow)"
+
+mkdir -p "${WORK}"
+VARS="${WORK}/OVMF_VARS.fd"
+cp -f "${OVMF_VARS_SRC}" "${VARS}"
+PIDFILE="${WORK}/qemu.pid"
+SOCKET="${WORK}/serial.sock"
+CAPTURE="${WORK}/smoke-capture.log"
+rm -f "${SOCKET}" "${PIDFILE}" "${CAPTURE}"
+
+ACCEL=()
+if [[ -r /dev/kvm ]]; then
+  ACCEL=(-enable-kvm -cpu host)
+else
+  ACCEL=(-cpu max)
+fi
+
+QEMU_BASE=(
+  qemu-system-x86_64
+  -name arch-rails-server-smoke
+  -machine q35
+  "${ACCEL[@]}"
+  -m "${MEM}"
+  -smp "${SMP}"
+  -drive "if=pflash,format=raw,readonly=on,file=${OVMF_CODE}"
+  -drive "if=pflash,format=raw,file=${VARS}"
+  -cdrom "${ISO}"
+  -boot order=d
+  -netdev user,id=n0
+  -device virtio-net-pci,netdev=n0
+  -display none
+  -device virtio-rng-pci
+)
+
+if [[ "${INTERACTIVE}" -eq 1 ]]; then
+  log "interactive serial console"
+  exec "${QEMU_BASE[@]}" -nographic -serial mon:stdio
+fi
+
+cleanup() {
+  if [[ -f "${PIDFILE}" ]]; then
+    pid="$(cat "${PIDFILE}" 2>/dev/null || true)"
+    if [[ -n "${pid}" ]] && kill -0 "${pid}" 2>/dev/null; then
+      kill "${pid}" 2>/dev/null || true
+      sleep 1
+      kill -9 "${pid}" 2>/dev/null || true
+    fi
+    rm -f "${PIDFILE}"
+  fi
+}
+trap cleanup EXIT
+
+log "starting QEMU (timeout ${BOOT_TIMEOUT}s); serial socket ${SOCKET}"
+"${QEMU_BASE[@]}" \
+  -chardev "socket,id=serial0,path=${SOCKET},server=on,wait=off" \
+  -serial chardev:serial0 \
+  -pidfile "${PIDFILE}" \
+  -daemonize
+
+for _ in $(seq 1 100); do
+  [[ -S "${SOCKET}" ]] && break
+  sleep 0.1
+done
+[[ -S "${SOCKET}" ]] || die "serial socket not created"
+
+export ARS_VM_SOCKET="${SOCKET}"
+export ARS_VM_TIMEOUT="${BOOT_TIMEOUT}"
+export ARS_VM_SERIAL_LOG="${CAPTURE}"
+set +e
+python3 "${ROOT}/scripts/vm-smoke.py"
+rc=$?
+set -e
+
+if [[ "${rc}" -eq 0 ]]; then
+  log "test-vm: smoke passed"
+else
+  log "test-vm: smoke failed (rc=${rc})"
+  [[ -f "${CAPTURE}" ]] && tail -100 "${CAPTURE}" || true
+fi
+exit "${rc}"

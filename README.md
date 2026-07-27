@@ -26,11 +26,12 @@ bin/kamal deploy
 On an Arch build machine:
 
 ```bash
-sudo pacman -S --needed archiso squashfs-tools libisoburn dosfstools mtools
+# one-time packages: docker, qemu-system-x86, edk2-ovmf (see docs/USB.md)
 # optional: bake SSH public keys
 mkdir -p iso/secrets && $EDITOR iso/secrets/authorized_keys
 
-sudo ./bin/build-iso
+./bin/build-iso-docker          # no host sudo
+./bin/test-vm                   # QEMU smoke
 lsblk   # find the USB whole-disk device, e.g. /dev/sdb
 sudo ./bin/make-usb /dev/sdX --i-know-this-wipes-the-device
 ```
@@ -90,8 +91,9 @@ out/             # built ISOs (gitignored)
 ./bin/verify          # assert Kamal host prerequisites
 sudo ./bin/bootstrap  # idempotent; safe to re-run after git pull
 
-# Live media (build host)
-sudo ./bin/build-iso
+# Live media (no host sudo for build/test)
+./bin/build-iso-docker
+./bin/verify-iso && ./bin/test-vm
 sudo ./bin/make-usb /dev/sdX --i-know-this-wipes-the-device
 ```
 

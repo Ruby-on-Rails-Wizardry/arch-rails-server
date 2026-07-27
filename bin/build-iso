@@ -14,6 +14,7 @@ SKIP_CLEAN=0
 usage() {
   cat <<EOF
 Usage: sudo $0 [options]
+   or: ./bin/build-iso-docker [options]   # no host sudo (Docker)
 
 Build arch-rails-server live ISO under ${OUT}/
 
@@ -25,8 +26,12 @@ Options:
   --skip-clean     Do not wipe work/profile before copy
   -h, --help       This help
 
-Build host packages:
+Host build (needs root):
   sudo pacman -S --needed archiso squashfs-tools libisoburn dosfstools mtools
+  sudo ./bin/build-iso
+
+Rootless host path (Docker; user in docker group):
+  ./bin/build-iso-docker
 
 Optional secrets (gitignored):
   iso/secrets/authorized_keys
@@ -91,6 +96,35 @@ fi
 # Ensure executable bits on live helpers
 chmod 755 "${PROFILE}/airootfs/usr/local/bin/ars" 2>/dev/null || true
 chmod 755 "${PROFILE}/airootfs/usr/local/bin/ars-copy-to-target" 2>/dev/null || true
+
+# Serial console for headless QEMU smoke tests (and rack serial)
+patch_serial_console() {
+  local f
+  if [[ -d "${PROFILE}/efiboot/loader/entries" ]]; then
+    for f in "${PROFILE}/efiboot/loader/entries/"*.conf; do
+      [[ -f "${f}" ]] || continue
+      if grep -q '^options ' "${f}" && ! grep -q 'console=ttyS0' "${f}"; then
+        sed -i 's/^options[[:space:]]\{1,\}/options  console=tty0 console=ttyS0,115200 /' "${f}"
+      fi
+    done
+  fi
+  if [[ -f "${PROFILE}/syslinux/archiso_sys-linux.cfg" ]]; then
+    if ! grep -q 'console=ttyS0' "${PROFILE}/syslinux/archiso_sys-linux.cfg"; then
+      sed -i 's/^APPEND /APPEND console=tty0 console=ttyS0,115200 /' \
+        "${PROFILE}/syslinux/archiso_sys-linux.cfg"
+    fi
+  fi
+  # GRUB loopback entries (UEFI/BIOS hybrid paths used by some archiso versions)
+  if [[ -d "${PROFILE}/grub" ]]; then
+    while IFS= read -r -d '' f; do
+      if grep -q 'archisobasedir=' "${f}" 2>/dev/null && ! grep -q 'console=ttyS0' "${f}"; then
+        sed -i 's/archisobasedir=/console=tty0 console=ttyS0,115200 archisobasedir=/' "${f}" || true
+      fi
+    done < <(find "${PROFILE}/grub" -type f \( -name '*.cfg' -o -name '*.cfg.in' \) -print0 2>/dev/null)
+  fi
+  log "serial console cmdline enabled (ttyS0)"
+}
+patch_serial_console
 
 # --- stage kit into airootfs ---
 KIT_DEST="${PROFILE}/airootfs/opt/arch-rails-server"

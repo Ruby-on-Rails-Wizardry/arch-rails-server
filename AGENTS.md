@@ -37,8 +37,9 @@ Bare-metal **Arch** host for **Rails + Kamal + Docker**. Not a dev image (that i
 
 ## Live ISO notes
 
-- Build only on Arch with `archiso`; needs root.
-- Never commit `iso/secrets/` or `out/`.
+- Prefer `./bin/build-iso-docker` (root only inside container). Host `sudo ./bin/build-iso` is the fallback.
+- Test with `./bin/verify-iso` and `./bin/test-vm` (no sudo; needs KVM + OVMF).
+- Never commit `iso/secrets/` or `out/` or `work/`.
 - Keep live package extras lean (`iso/overlay/packages.x86_64.add`); Docker belongs on the target via bootstrap.
 - `make-usb` must keep wipe safety rails (whole-disk only, explicit flag, refuse `/` disk).
 

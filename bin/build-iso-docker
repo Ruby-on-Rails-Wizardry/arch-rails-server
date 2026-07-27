@@ -1,0 +1,96 @@
+#!/usr/bin/env bash
+# Build the live ISO without host sudo, using Docker (privileged container).
+# Requires: docker CLI, membership in the docker group, network for pacman.
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+IMAGE="${ARS_BUILD_IMAGE:-docker.io/library/archlinux:latest}"
+HOST_UID="$(id -u)"
+HOST_GID="$(id -g)"
+PASS_ARGS=("$@")
+
+usage() {
+  cat <<EOF
+Usage: $0 [build-iso options…]
+
+Runs ./bin/build-iso as root inside a privileged Arch container and writes
+ISOs to out/ owned by your user. No host sudo required.
+
+Environment:
+  ARS_BUILD_IMAGE   Container image (default: ${IMAGE})
+
+Examples:
+  $0
+  $0 --keep-work
+  $0 --out /tmp/ars-out
+EOF
+}
+
+log() { printf '==> %s\n' "$*"; }
+die() { printf 'error: %s\n' "$*" >&2; exit 1; }
+
+for a in "${PASS_ARGS[@]+"${PASS_ARGS[@]}"}"; do
+  case "$a" in
+    -h|--help) usage; exit 0 ;;
+  esac
+done
+
+command -v docker >/dev/null 2>&1 || die "docker not found"
+docker info >/dev/null 2>&1 || die "cannot talk to Docker daemon (is your user in group docker?)"
+
+mkdir -p "${ROOT}/out" "${ROOT}/work"
+
+log "pulling ${IMAGE} (if needed)"
+docker pull "${IMAGE}"
+
+log "building ISO inside container (this can take a long time)"
+
+# mkarchiso requires SOURCE_DATE_EPOCH to be a numeric unix timestamp when set
+: "${SOURCE_DATE_EPOCH:=$(date +%s)}"
+
+DOCKER_ENV=(
+  -e "HOST_UID=${HOST_UID}"
+  -e "HOST_GID=${HOST_GID}"
+  -e "SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH}"
+)
+
+# Pass build-iso args after -- so the inner script sees them as "$@"
+docker run --rm --privileged -i \
+  --name "ars-build-iso-$$" \
+  "${DOCKER_ENV[@]}" \
+  -v "${ROOT}:/repo:rw" \
+  -w /repo \
+  "${IMAGE}" \
+  bash -s -- "${PASS_ARGS[@]+"${PASS_ARGS[@]}"}" <<'INNER'
+set -euo pipefail
+log() { printf '==> [container] %s\n' "$*"; }
+export LANG=C.UTF-8
+
+log "pacman sync + install archiso toolchain"
+pacman-key --init
+pacman-key --populate archlinux
+pacman -Syu --noconfirm
+pacman -S --needed --noconfirm \
+  archiso squashfs-tools libisoburn dosfstools mtools \
+  git rsync sed findutils coreutils tar gzip which
+
+# Allow git metadata for VERSION stamp on bind-mounted repo
+git config --global --add safe.directory /repo 2>/dev/null || true
+
+log "running bin/build-iso $*"
+./bin/build-iso "$@"
+
+log "fixing ownership to ${HOST_UID}:${HOST_GID}"
+chown -R "${HOST_UID}:${HOST_GID}" /repo/out 2>/dev/null || true
+chown -R "${HOST_UID}:${HOST_GID}" /repo/work 2>/dev/null || true
+log "container done"
+INNER
+
+log "host-side result:"
+ls -lah "${ROOT}/out" || true
+if [[ -e "${ROOT}/out/arch-rails-server-latest.iso" ]]; then
+  log "ISO ready: ${ROOT}/out/arch-rails-server-latest.iso"
+  log "Next: ./bin/verify-iso && ./bin/test-vm"
+else
+  die "build finished but out/arch-rails-server-latest.iso missing"
+fi
