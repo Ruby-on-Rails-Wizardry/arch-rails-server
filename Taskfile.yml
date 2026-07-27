@@ -1,0 +1,27 @@
+version: "3"
+
+tasks:
+  default:
+    desc: List tasks
+    cmds:
+      - task --list
+
+  doctor:
+    desc: Host health (read-only)
+    cmds:
+      - ./bin/doctor
+
+  verify:
+    desc: Assert Kamal host prerequisites
+    cmds:
+      - ./bin/verify
+
+  bootstrap:
+    desc: Run post-install bootstrap (needs root)
+    cmds:
+      - ./bin/bootstrap
+
+  setup-remotes:
+    desc: Configure github + gitlab remotes
+    cmds:
+      - ./bin/setup-remotes

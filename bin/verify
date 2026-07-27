@@ -1,0 +1,64 @@
+#!/usr/bin/env bash
+# Exit 0 only if this host meets Kamal prerequisites for arch-rails-server.
+set -euo pipefail
+
+failures=0
+pass() { printf 'PASS  %s\n' "$*"; }
+fail() { printf 'FAIL  %s\n' "$*"; failures=$((failures + 1)); }
+
+echo "arch-rails-server verify"
+echo
+
+if [[ -f /etc/arch-release ]] || grep -qi arch /etc/os-release 2>/dev/null; then
+  pass "Arch Linux"
+else
+  fail "OS is not Arch Linux"
+fi
+
+if systemctl is-active --quiet sshd 2>/dev/null || systemctl is-active --quiet ssh 2>/dev/null; then
+  pass "sshd active"
+else
+  fail "sshd not active"
+fi
+
+if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
+  pass "docker usable"
+else
+  fail "docker not usable (install/start docker; check group membership)"
+fi
+
+if systemctl is-active --quiet docker 2>/dev/null; then
+  pass "docker.service active"
+else
+  fail "docker.service not active"
+fi
+
+# IP forwarding (Docker bridge)
+if [[ "$(sysctl -n net.ipv4.ip_forward 2>/dev/null || echo 0)" == "1" ]]; then
+  pass "net.ipv4.ip_forward=1"
+else
+  fail "net.ipv4.ip_forward is not 1"
+fi
+
+# At least one of root or deploy should have authorized_keys if hardening was applied
+if [[ -s /root/.ssh/authorized_keys ]] || [[ -s /home/deploy/.ssh/authorized_keys ]]; then
+  pass "authorized_keys present for root and/or deploy"
+else
+  fail "no authorized_keys for root or deploy — Kamal SSH will fail without keys"
+fi
+
+# Free disk on /
+avail_kb=$(df -Pk / | awk 'NR==2 {print $4}')
+if [[ "${avail_kb}" -gt 5242880 ]]; then
+  pass ">= 5 GiB free on /"
+else
+  fail "low disk on / (${avail_kb} KiB free); free space for images/volumes"
+fi
+
+echo
+if [[ "${failures}" -eq 0 ]]; then
+  echo "All checks passed — host looks ready for bin/kamal setup"
+  exit 0
+fi
+echo "${failures} check(s) failed"
+exit 1

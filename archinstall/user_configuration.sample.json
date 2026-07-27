@@ -1,0 +1,68 @@
+{
+  "archinstall-language": "English",
+  "audio_config": null,
+  "bootloader_config": {
+    "bootloader": "Systemd-boot",
+    "uki": false,
+    "removable": false
+  },
+  "debug": false,
+  "hostname": "rails-host",
+  "kernels": [
+    "linux"
+  ],
+  "locale_config": {
+    "kb_layout": "us",
+    "sys_enc": "UTF-8",
+    "sys_lang": "en_US"
+  },
+  "mirror_config": {
+    "custom_servers": [],
+    "mirror_regions": {
+      "United States": []
+    },
+    "optional_repositories": [],
+    "custom_repositories": []
+  },
+  "network_config": {
+    "type": "nm"
+  },
+  "no_pkg_lookups": false,
+  "ntp": true,
+  "offline": false,
+  "packages": [
+    "openssh",
+    "git",
+    "curl",
+    "sudo",
+    "vim",
+    "base-devel",
+    "wget",
+    "rsync",
+    "jq",
+    "nftables"
+  ],
+  "pacman_config": {
+    "parallel_downloads": 5
+  },
+  "profile_config": {
+    "gfx_driver": null,
+    "greeter": null,
+    "profile": {
+      "details": [],
+      "main": "Minimal"
+    }
+  },
+  "script": "guided",
+  "silent": false,
+  "swap": {
+    "enabled": true,
+    "algorithm": "zstd"
+  },
+  "timezone": "UTC",
+  "services": [
+    "sshd",
+    "NetworkManager"
+  ],
+  "version": "3.0.2"
+}

@@ -1,0 +1,82 @@
+#!/usr/bin/env bash
+# Read-only host health for an arch-rails-server / Kamal target.
+set -euo pipefail
+
+ok()   { printf '  [ok]   %s\n' "$*"; }
+bad()  { printf '  [!!]   %s\n' "$*"; }
+info() { printf '  [--]   %s\n' "$*"; }
+
+echo "arch-rails-server doctor"
+echo "host: $(hostname)  date: $(date -Is)"
+echo
+
+echo "OS"
+if [[ -f /etc/arch-release ]] || grep -qi arch /etc/os-release 2>/dev/null; then
+  ok "Arch Linux ($(grep PRETTY_NAME= /etc/os-release | cut -d= -f2 | tr -d '"'))"
+else
+  bad "not Arch (bootstrap targets Arch)"
+fi
+info "kernel $(uname -r)  arch $(uname -m)"
+echo
+
+echo "SSH"
+if systemctl is-active --quiet sshd 2>/dev/null || systemctl is-active --quiet ssh 2>/dev/null; then
+  ok "sshd active"
+else
+  bad "sshd not active"
+fi
+if [[ -d /etc/ssh/sshd_config.d ]] && compgen -G '/etc/ssh/sshd_config.d/*arch-rails*' >/dev/null; then
+  ok "arch-rails-server sshd drop-in present"
+else
+  info "no arch-rails-server sshd drop-in (bootstrap not run?)"
+fi
+echo
+
+echo "Docker"
+if command -v docker >/dev/null 2>&1; then
+  if docker info >/dev/null 2>&1; then
+    ok "docker responds ($(docker version --format '{{.Server.Version}}' 2>/dev/null || echo '?'))"
+  else
+    bad "docker installed but not usable (permission or service?)"
+  fi
+  if systemctl is-active --quiet docker 2>/dev/null; then
+    ok "docker.service active"
+  else
+    bad "docker.service not active"
+  fi
+else
+  bad "docker not installed"
+fi
+echo
+
+echo "User / groups"
+if id deploy >/dev/null 2>&1; then
+  ok "user deploy exists ($(id deploy))"
+  if id -nG deploy 2>/dev/null | grep -qw docker; then
+    ok "deploy in docker group"
+  else
+    bad "deploy not in docker group"
+  fi
+else
+  info "user deploy not found (DEPLOY_USER may differ)"
+fi
+echo
+
+echo "Firewall"
+if command -v nft >/dev/null 2>&1 && nft list table inet arch_rails_server >/dev/null 2>&1; then
+  ok "nftables table inet arch_rails_server loaded"
+else
+  info "arch_rails_server nft table not loaded"
+fi
+echo
+
+echo "Disk"
+df -h / /var 2>/dev/null | sed 's/^/  /' || df -h / | sed 's/^/  /'
+echo
+
+echo "Listening (ss)"
+if command -v ss >/dev/null 2>&1; then
+  ss -tlnp 2>/dev/null | head -30 | sed 's/^/  /' || true
+else
+  info "ss not available"
+fi

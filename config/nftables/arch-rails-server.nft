@@ -1,0 +1,23 @@
+#!/usr/sbin/nft -f
+# Dedicated table so we do not flush Docker's iptables-nft rules.
+# Only filters host INPUT; forward/publish stays Docker's job.
+# Bootstrap may rewrite the tcp dport lines from defaults.env.
+
+destroy table inet arch_rails_server
+
+table inet arch_rails_server {
+  chain input {
+    type filter hook input priority filter; policy drop;
+
+    ct state invalid drop
+    ct state established,related accept
+    iif "lo" accept
+
+    ip protocol icmp accept
+    ip6 nexthdr icmpv6 accept
+
+    tcp dport 22 accept
+    tcp dport 80 accept
+    tcp dport 443 accept
+  }
+}

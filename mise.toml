@@ -1,0 +1,3 @@
+# Host tooling for maintainers of this repo (not installed on the Rails server by bootstrap).
+[tools]
+task = "3.52.0"

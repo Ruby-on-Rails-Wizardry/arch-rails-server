@@ -1,0 +1,25 @@
+# Fragment for a Rails app config/deploy.yml targeting an arch-rails-server host.
+# Merge into your app's deploy.yml — do not deploy from this repo alone.
+
+# service: my_app
+# image: my-registry-user/my_app
+
+servers:
+  web:
+    - 203.0.113.10   # replace with this host's IP or DNS name
+  # job:
+  #   hosts:
+  #     - 203.0.113.10
+  #   cmd: bin/jobs
+
+proxy:
+  ssl: true
+  host: app.example.com
+
+# Prefer the deploy user created by bootstrap (docker group).
+ssh:
+  user: deploy
+
+# registry: ...
+# env: ...
+# volumes: ...

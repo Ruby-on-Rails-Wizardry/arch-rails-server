@@ -1,0 +1,5 @@
+# Allow deploy user to manage Docker-related services without a full root shell.
+# Installed only when DEPLOY_USER is created by bootstrap.
+
+Defaults:deploy !requiretty
+deploy ALL=(root) NOPASSWD: /usr/bin/systemctl start docker, /usr/bin/systemctl stop docker, /usr/bin/systemctl restart docker, /usr/bin/systemctl status docker, /usr/bin/systemctl reload docker

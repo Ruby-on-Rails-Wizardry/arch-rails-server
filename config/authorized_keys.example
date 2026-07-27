@@ -1,0 +1,2 @@
+# Copy to config/authorized_keys (not committed) — one OpenSSH public key per line.
+# ssh-ed25519 AAAA... comment@host

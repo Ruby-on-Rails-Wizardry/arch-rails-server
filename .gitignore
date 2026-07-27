@@ -1,0 +1,18 @@
+# Local operator config (may contain keys / host-specific env)
+config/defaults.env
+config/authorized_keys
+
+# archinstall real credentials / layouts (never commit secrets)
+archinstall/user_credentials.json
+archinstall/user_disk_layout.json
+archinstall/user_configuration.json
+
+# Editor / OS
+*~
+*.swp
+.DS_Store
+.idea/
+.vscode/
+
+# mise local
+.mise.local.toml
