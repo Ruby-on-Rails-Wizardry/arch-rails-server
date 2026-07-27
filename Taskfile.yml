@@ -25,3 +25,18 @@ tasks:
     desc: Configure github + gitlab remotes
     cmds:
       - ./bin/setup-remotes
+
+  build-iso:
+    desc: Build live ISO (requires root + archiso)
+    cmds:
+      - ./bin/build-iso
+
+  make-usb:
+    desc: "Write ISO to USB — usage: task make-usb -- /dev/sdX --i-know-this-wipes-the-device"
+    cmds:
+      - ./bin/make-usb {{.CLI_ARGS}}
+
+  check-shell:
+    desc: bash -n on scripts
+    cmds:
+      - ./scripts/check-shell.sh

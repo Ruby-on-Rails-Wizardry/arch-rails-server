@@ -2,6 +2,8 @@
 
 End-to-end path from empty machine to Kamal-ready Arch host.
 
+**Prefer one stick with everything included?** Use **[USB.md](USB.md)** (`build-iso` + `make-usb` + live `ars` helper). This page covers the classic “official Arch ISO + clone repo” path as well as post-install bootstrap shared by both flows.
+
 ## 0. Prerequisites
 
 - Target machine can boot USB/ISO
@@ -9,7 +11,20 @@ End-to-end path from empty machine to Kamal-ready Arch host.
 - Your SSH **public** key ready
 - Familiarity with wiping the install disk
 
-## 1. Boot Arch ISO
+## 1. Boot install media
+
+### Option A — arch-rails-server USB (recommended)
+
+See [USB.md](USB.md). After boot:
+
+```bash
+ars status
+archinstall
+ars copy-to-target && ars bootstrap-target
+# then reboot and continue from "6. Point a Rails app" below
+```
+
+### Option B — official Arch ISO
 
 1. Download the latest ISO from <https://archlinux.org/download/>.
 2. Write it to USB (`dd`, `balenaEtcher`, `ddrescue`, …).

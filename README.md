@@ -10,7 +10,8 @@ This is a **production host**, not a development image. For Arch + mise dev cont
 |-------|------|
 | [archinstall/](archinstall/) | Declarative base install (minimal server, SSH, disk left for you to set) |
 | [bootstrap/](bootstrap/) | Post-install hardening: Docker Engine, firewall, deploy user, sysctl |
-| [docs/](docs/) | Install walkthrough + Kamal wiring for Rails apps |
+| [iso/](iso/) + `bin/build-iso` / `bin/make-usb` | Single bootable USB with Arch live + this entire kit |
+| [docs/](docs/) | Install walkthrough, USB media, Kamal wiring |
 
 After bootstrap, the machine is ready for:
 
@@ -20,7 +21,25 @@ bin/kamal setup
 bin/kamal deploy
 ```
 
-## Quick path
+## Quick path (USB stick)
+
+On an Arch build machine:
+
+```bash
+sudo pacman -S --needed archiso squashfs-tools libisoburn dosfstools mtools
+# optional: bake SSH public keys
+mkdir -p iso/secrets && $EDITOR iso/secrets/authorized_keys
+
+sudo ./bin/build-iso
+lsblk   # find the USB whole-disk device, e.g. /dev/sdb
+sudo ./bin/make-usb /dev/sdX --i-know-this-wipes-the-device
+```
+
+On the new server: boot the stick → `ars status` → `archinstall` → `ars copy-to-target` → `ars bootstrap-target` → reboot → Kamal deploy.
+
+Full detail: **[docs/USB.md](docs/USB.md)**.
+
+## Quick path (official ISO + clone)
 
 1. Boot the official [Arch ISO](https://archlinux.org/download/) on the new server.
 2. Customize and run **archinstall** with this repo’s profile (see [docs/INSTALL.md](docs/INSTALL.md)).
@@ -58,8 +77,10 @@ Override via `config/defaults.env` (see `config/defaults.env.example`).
 archinstall/     # user_configuration.json template + notes
 bootstrap/       # post-install modules
 config/          # env, sshd drop-in, nftables, sysctl
-bin/             # bootstrap, verify, doctor, setup-remotes
-docs/            # INSTALL, KAMAL, HARDENING, RELEASE
+iso/             # archiso overlay + optional secrets for live media
+bin/             # bootstrap, verify, doctor, build-iso, make-usb, …
+docs/            # INSTALL, USB, KAMAL, HARDENING, RELEASE
+out/             # built ISOs (gitignored)
 ```
 
 ## Day-to-day
@@ -68,6 +89,10 @@ docs/            # INSTALL, KAMAL, HARDENING, RELEASE
 ./bin/doctor          # read-only host health
 ./bin/verify          # assert Kamal host prerequisites
 sudo ./bin/bootstrap  # idempotent; safe to re-run after git pull
+
+# Live media (build host)
+sudo ./bin/build-iso
+sudo ./bin/make-usb /dev/sdX --i-know-this-wipes-the-device
 ```
 
 ## Remotes

@@ -16,3 +16,10 @@ archinstall/user_configuration.json
 
 # mise local
 .mise.local.toml
+
+# ISO build artifacts
+out/
+work/
+
+# Keys/env baked into live media at build time (never commit)
+iso/secrets/

@@ -30,8 +30,17 @@ Bare-metal **Arch** host for **Rails + Kamal + Docker**. Not a dev image (that i
 | `bootstrap/lib/*.sh` | Package sets, service enablement, user/firewall logic |
 | `config/` | Drop-in files installed by bootstrap |
 | `archinstall/` | Base install profile only |
-| `docs/KAMAL.md` | When Kamal flags or Rails deploy defaults change |
+| `iso/overlay/` | Live ISO MOTD, `ars` helper, extra packages |
+| `bin/build-iso` / `bin/make-usb` | Media build/write safety and staging |
+| `docs/KAMAL.md` / `docs/USB.md` | When Kamal or media flow changes |
 | `CHANGELOG.md` | User-visible behavior |
+
+## Live ISO notes
+
+- Build only on Arch with `archiso`; needs root.
+- Never commit `iso/secrets/` or `out/`.
+- Keep live package extras lean (`iso/overlay/packages.x86_64.add`); Docker belongs on the target via bootstrap.
+- `make-usb` must keep wipe safety rails (whole-disk only, explicit flag, refuse `/` disk).
 
 ## Verify before shipping
 

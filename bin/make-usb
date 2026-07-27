@@ -1,0 +1,151 @@
+#!/usr/bin/env bash
+# Write an arch-rails-server ISO to a block device (USB stick).
+# WIPES THE ENTIRE DEVICE. Requires an explicit safety flag.
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ISO="${ISO:-}"
+DEVICE=""
+WIPE_OK=0
+ALLOW_NON_REMOVABLE=0
+DRY_RUN=0
+BS="${BS:-4M}"
+
+usage() {
+  cat <<EOF
+Usage: sudo $0 DEVICE --i-know-this-wipes-the-device [options]
+
+Write a bootable arch-rails-server ISO to a USB stick.
+
+  DEVICE     Whole-disk device, e.g. /dev/sdb or /dev/nvme1n1
+             Never a partition like /dev/sdb1
+
+Options:
+  --iso PATH     ISO file (default: out/arch-rails-server-latest.iso
+                 or newest out/arch-rails-server-*.iso)
+  --i-know-this-wipes-the-device
+                 Required safety acknowledgement (device will be erased)
+  --allow-non-removable
+                 Allow writing to a disk not marked removable (dangerous)
+  --dry-run      Print actions only
+  --bs SIZE      dd block size (default: 4M)
+  -h, --help
+
+Examples:
+  sudo ./bin/build-iso
+  lsblk -o NAME,SIZE,TYPE,RM,TRAN,MOUNTPOINT
+  sudo ./bin/make-usb /dev/sdb --i-know-this-wipes-the-device
+EOF
+}
+
+log() { printf '==> %s\n' "$*"; }
+die() { printf 'error: %s\n' "$*" >&2; exit 1; }
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --iso) ISO="$2"; shift 2 ;;
+    --i-know-this-wipes-the-device) WIPE_OK=1; shift ;;
+    --allow-non-removable) ALLOW_NON_REMOVABLE=1; shift ;;
+    --dry-run) DRY_RUN=1; shift ;;
+    --bs) BS="$2"; shift 2 ;;
+    -h|--help) usage; exit 0 ;;
+    /dev/*)
+      [[ -z "${DEVICE}" ]] || die "multiple devices specified"
+      DEVICE="$1"
+      shift
+      ;;
+    *) die "unknown argument: $1" ;;
+  esac
+done
+
+[[ -n "${DEVICE}" ]] || { usage >&2; die "DEVICE is required"; }
+[[ "${WIPE_OK}" -eq 1 ]] || die "refusing to write: pass --i-know-this-wipes-the-device"
+
+if [[ "${EUID}" -ne 0 && "${DRY_RUN}" -eq 0 ]]; then
+  die "run as root: sudo $0 ${DEVICE} --i-know-this-wipes-the-device"
+fi
+
+# Device sanity first (fail closed before touching ISO paths)
+[[ -b "${DEVICE}" ]] || die "not a block device: ${DEVICE}"
+
+base="$(basename "${DEVICE}")"
+sys="/sys/class/block/${base}"
+[[ -d "${sys}" ]] || die "no sysfs for ${base}"
+
+# Reject partitions via sysfs (covers sdX1, nvme0n1p1, mmcblk0p1, …)
+if [[ -f "${sys}/partition" ]]; then
+  die "refusing partition ${DEVICE} — pass the whole disk (e.g. /dev/sdb or /dev/nvme1n1)"
+fi
+
+# Resolve ISO
+if [[ -z "${ISO}" ]]; then
+  if [[ -L "${ROOT}/out/arch-rails-server-latest.iso" || -f "${ROOT}/out/arch-rails-server-latest.iso" ]]; then
+    ISO="${ROOT}/out/arch-rails-server-latest.iso"
+  else
+    shopt -s nullglob
+    candidates=("${ROOT}/out"/arch-rails-server-*.iso "${ROOT}/out"/*.iso)
+    shopt -u nullglob
+    if [[ ${#candidates[@]} -eq 0 ]]; then
+      die "no ISO found under ${ROOT}/out — run: sudo ./bin/build-iso"
+    fi
+    ISO="$(ls -t "${candidates[@]}" | head -1)"
+  fi
+fi
+ISO="$(readlink -f "${ISO}")"
+[[ -f "${ISO}" ]] || die "ISO not found: ${ISO}"
+
+# Never wipe the device that holds /
+root_src="$(findmnt -no SOURCE / 2>/dev/null || true)"
+if [[ -n "${root_src}" ]]; then
+  root_disk="$(lsblk -no PKNAME "${root_src}" 2>/dev/null || true)"
+  if [[ -z "${root_disk}" ]]; then
+    root_disk="$(basename "${root_src}" | sed -E 's/p?[0-9]+$//')"
+  fi
+  if [[ "${base}" == "${root_disk}" || "${DEVICE}" == "${root_src}" ]]; then
+    die "refusing to write to the disk that hosts / (${DEVICE})"
+  fi
+fi
+
+# Removable heuristic
+rm_flag="$(cat "${sys}/removable" 2>/dev/null || echo 0)"
+tran="$(lsblk -no TRAN "${DEVICE}" 2>/dev/null | head -1 | tr -d ' ' || true)"
+if [[ "${rm_flag}" != "1" && "${tran}" != "usb" && "${ALLOW_NON_REMOVABLE}" -ne 1 ]]; then
+  die "device ${DEVICE} does not look like removable USB (RM=${rm_flag} TRAN=${tran:-?}).
+If you are sure, re-run with --allow-non-removable (still wipes the disk)."
+fi
+
+# Mounted partitions under this disk?
+mounted="$(lsblk -no MOUNTPOINT "${DEVICE}" | awk 'NF' || true)"
+if [[ -n "${mounted}" ]]; then
+  die "device has mounted filesystems — unmount first:
+$(lsblk "${DEVICE}")"
+fi
+
+size_bytes="$(lsblk -bno SIZE "${DEVICE}" | head -1)"
+iso_bytes="$(stat -c %s "${ISO}")"
+if [[ "${size_bytes}" -lt "${iso_bytes}" ]]; then
+  die "device smaller than ISO ($(numfmt --to=iec "${size_bytes}") < $(numfmt --to=iec "${iso_bytes}"))"
+fi
+
+log "ISO:    ${ISO} ($(numfmt --to=iec "${iso_bytes}"))"
+log "DEVICE: ${DEVICE} ($(numfmt --to=iec "${size_bytes}") RM=${rm_flag} TRAN=${tran:-?})"
+lsblk -o NAME,SIZE,TYPE,RM,TRAN,MOUNTPOINT "${DEVICE}" || true
+
+if [[ "${DRY_RUN}" -eq 1 ]]; then
+  log "dry-run: would run dd if=${ISO} of=${DEVICE} bs=${BS} status=progress conv=fsync oflag=direct"
+  exit 0
+fi
+
+log "wiping and writing (this takes a few minutes)…"
+# Drop caches / sync
+sync
+dd if="${ISO}" of="${DEVICE}" bs="${BS}" status=progress conv=fsync oflag=direct
+sync
+# Re-read partition table
+if command -v partprobe >/dev/null 2>&1; then
+  partprobe "${DEVICE}" 2>/dev/null || true
+fi
+udevadm settle 2>/dev/null || true
+
+log "done. Boot the target machine from this USB (UEFI preferred)."
+log "On the live system: ars help"

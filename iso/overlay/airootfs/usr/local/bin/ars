@@ -1,0 +1,142 @@
+#!/usr/bin/env bash
+# Live-media helper for arch-rails-server.
+set -euo pipefail
+
+ARS_ROOT="${ARS_ROOT:-/opt/arch-rails-server}"
+
+usage() {
+  cat <<'EOF'
+ars — arch-rails-server live helper
+
+Usage:
+  ars help              This text
+  ars path              Print kit root
+  ars status            Network, kit, secrets summary
+  ars keys              Show whether authorized_keys is staged
+  ars archinstall       cd to kit archinstall/ and print suggested command
+  ars copy-to-target    Copy kit into installed system at /mnt (pre-reboot)
+  ars bootstrap-target  arch-chroot /mnt and run bin/bootstrap (needs /mnt)
+  ars docs [name]       less a doc (INSTALL, USB, KAMAL, HARDENING)
+
+Environment:
+  ARS_ROOT   Kit path (default /opt/arch-rails-server)
+  MNT        Install mount (default /mnt)
+EOF
+}
+
+die() { printf 'error: %s\n' "$*" >&2; exit 1; }
+
+cmd_path() {
+  printf '%s\n' "${ARS_ROOT}"
+}
+
+cmd_status() {
+  echo "ARS_ROOT=${ARS_ROOT}"
+  if [[ -d "${ARS_ROOT}" ]]; then
+    echo "kit: present"
+    if [[ -f "${ARS_ROOT}/VERSION" ]]; then
+      echo "version: $(cat "${ARS_ROOT}/VERSION")"
+    fi
+  else
+    echo "kit: MISSING"
+  fi
+
+  if ping -c1 -W2 archlinux.org >/dev/null 2>&1; then
+    echo "network: ok (archlinux.org)"
+  else
+    echo "network: no ping to archlinux.org (configure networking first)"
+  fi
+
+  if [[ -f "${ARS_ROOT}/config/authorized_keys" ]]; then
+    local n
+    n=$(grep -cve '^\s*$' -e '^#' "${ARS_ROOT}/config/authorized_keys" || true)
+    echo "authorized_keys: ${n} key line(s)"
+  else
+    echo "authorized_keys: not staged (copy into iso/secrets/ before build-iso, or edit on live system)"
+  fi
+
+  if [[ -d "${MNT:-/mnt}/etc" ]]; then
+    echo "target /mnt: looks mounted (etc present)"
+  else
+    echo "target /mnt: not ready (normal before archinstall finishes)"
+  fi
+}
+
+cmd_keys() {
+  local f="${ARS_ROOT}/config/authorized_keys"
+  if [[ ! -f "${f}" ]]; then
+    echo "No ${f}"
+    echo "On the build host: put keys in iso/secrets/authorized_keys then rebuild, or:"
+    echo "  nano ${ARS_ROOT}/config/authorized_keys"
+    return 1
+  fi
+  echo "Contents of ${f}:"
+  grep -v '^\s*$' "${f}" | sed 's/^\(....\).*\(....\)$/\1…\2/' || cat "${f}"
+}
+
+cmd_archinstall() {
+  local d="${ARS_ROOT}/archinstall"
+  echo "Sample config: ${d}/user_configuration.sample.json"
+  echo "Notes:         ${d}/README.md"
+  echo
+  echo "Recommended: run guided install (set disk carefully), then copy kit:"
+  echo "  archinstall"
+  echo "  ars copy-to-target"
+  echo "  arch-chroot /mnt /opt/arch-rails-server/bin/bootstrap"
+  echo
+  echo "Declarative (only after you have a real disk layout for THIS machine):"
+  echo "  cd ${d}"
+  echo "  # edit user_configuration.json + credentials + disk layout"
+  echo "  archinstall --config user_configuration.json --creds user_credentials.json"
+  if [[ -d "${d}" ]]; then
+    cd "${d}" || true
+    echo
+    echo "(cwd is now ${d})"
+  fi
+}
+
+cmd_copy_to_target() {
+  exec ars-copy-to-target "$@"
+}
+
+cmd_bootstrap_target() {
+  local mnt="${MNT:-/mnt}"
+  [[ -d "${mnt}/etc" ]] || die "${mnt} does not look like an installed system (no etc/)"
+  [[ -x "${mnt}/opt/arch-rails-server/bin/bootstrap" ]] || {
+    echo "Kit not on target; running copy first…"
+    ars-copy-to-target
+  }
+  # Ensure keys/env exist on target before bootstrap
+  if [[ ! -f "${mnt}/opt/arch-rails-server/config/authorized_keys" ]]; then
+    echo "warning: no authorized_keys on target — SSH key login may fail after hardening" >&2
+  fi
+  echo "Running bootstrap inside arch-chroot ${mnt} …"
+  arch-chroot "${mnt}" /opt/arch-rails-server/bin/bootstrap
+}
+
+cmd_docs() {
+  local name="${1:-INSTALL}"
+  name="${name%.md}"
+  local f="${ARS_ROOT}/docs/${name}.md"
+  [[ -f "${f}" ]] || f="${ARS_ROOT}/docs/${name^^}.md"
+  [[ -f "${f}" ]] || die "doc not found: ${name} (tried under ${ARS_ROOT}/docs)"
+  less -R "${f}"
+}
+
+main() {
+  local cmd="${1:-help}"
+  shift || true
+  case "${cmd}" in
+    help|-h|--help) usage ;;
+    path) cmd_path ;;
+    status) cmd_status ;;
+    keys) cmd_keys ;;
+    archinstall) cmd_archinstall ;;
+    copy-to-target|copy) cmd_copy_to_target "$@" ;;
+    bootstrap-target|bootstrap) cmd_bootstrap_target "$@" ;;
+    docs|doc) cmd_docs "$@" ;;
+    *) die "unknown command: ${cmd} (try: ars help)" ;;
+  esac
+}
+
+main "$@"

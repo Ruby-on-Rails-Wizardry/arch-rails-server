@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+# Copy /opt/arch-rails-server into the archinstall target mount (default /mnt).
+set -euo pipefail
+
+ARS_ROOT="${ARS_ROOT:-/opt/arch-rails-server}"
+MNT="${MNT:-/mnt}"
+DEST="${MNT}/opt/arch-rails-server"
+
+die() { printf 'error: %s\n' "$*" >&2; exit 1; }
+
+[[ -d "${ARS_ROOT}" ]] || die "kit missing at ${ARS_ROOT}"
+[[ -d "${MNT}/etc" ]] || die "${MNT} does not look like an installed root (run after archinstall leaves the system mounted, or remount)"
+
+echo "==> copying ${ARS_ROOT} -> ${DEST}"
+mkdir -p "${MNT}/opt"
+rm -rf "${DEST}"
+# Prefer rsync when present
+if command -v rsync >/dev/null 2>&1; then
+  rsync -a --delete "${ARS_ROOT}/" "${DEST}/"
+else
+  cp -a "${ARS_ROOT}" "${DEST}"
+fi
+
+# Symlink convenience for root home on target
+mkdir -p "${MNT}/root"
+ln -sfn /opt/arch-rails-server "${MNT}/root/arch-rails-server"
+
+echo "done."
+echo "Next (optional, before reboot):"
+echo "  arch-chroot ${MNT} /opt/arch-rails-server/bin/bootstrap"
+echo "  # or: ars bootstrap-target"

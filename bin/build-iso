@@ -1,0 +1,175 @@
+#!/usr/bin/env bash
+# Build a bootable arch-rails-server ISO (archiso releng + kit overlay).
+# Requires root and the archiso package on an Arch build host.
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+RELENG_SRC="${RELENG_SRC:-/usr/share/archiso/configs/releng}"
+WORK="${WORK:-${ROOT}/work/iso}"
+OUT="${OUT:-${ROOT}/out}"
+PROFILE="${WORK}/profile"
+KEEP_WORK=0
+SKIP_CLEAN=0
+
+usage() {
+  cat <<EOF
+Usage: sudo $0 [options]
+
+Build arch-rails-server live ISO under ${OUT}/
+
+Options:
+  --work DIR       Build work directory (default: ${ROOT}/work/iso)
+  --out DIR        ISO output directory (default: ${ROOT}/out)
+  --releng DIR     Base archiso profile (default: ${RELENG_SRC})
+  --keep-work      Do not delete work dir after success
+  --skip-clean     Do not wipe work/profile before copy
+  -h, --help       This help
+
+Build host packages:
+  sudo pacman -S --needed archiso squashfs-tools libisoburn dosfstools mtools
+
+Optional secrets (gitignored):
+  iso/secrets/authorized_keys
+  iso/secrets/defaults.env
+EOF
+}
+
+log() { printf '==> %s\n' "$*"; }
+die() { printf 'error: %s\n' "$*" >&2; exit 1; }
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --work) WORK="$2"; PROFILE="${WORK}/profile"; shift 2 ;;
+    --out) OUT="$2"; shift 2 ;;
+    --releng) RELENG_SRC="$2"; shift 2 ;;
+    --keep-work) KEEP_WORK=1; shift ;;
+    --skip-clean) SKIP_CLEAN=1; shift ;;
+    -h|--help) usage; exit 0 ;;
+    *) die "unknown option: $1" ;;
+  esac
+done
+
+[[ "${EUID}" -eq 0 ]] || die "run as root (mkarchiso needs privileges): sudo $0"
+[[ -d "${RELENG_SRC}" ]] || die "archiso releng not found at ${RELENG_SRC}
+Install: pacman -S archiso"
+command -v mkarchiso >/dev/null 2>&1 || die "mkarchiso not in PATH (install archiso)"
+
+# --- prepare profile from releng ---
+if [[ "${SKIP_CLEAN}" -eq 0 ]]; then
+  log "cleaning ${WORK}"
+  rm -rf "${WORK}"
+fi
+mkdir -p "${WORK}" "${OUT}"
+log "copying releng -> ${PROFILE}"
+cp -a "${RELENG_SRC}" "${PROFILE}"
+
+# Merge overlay (profiledef, airootfs, etc.)
+log "merging iso/overlay"
+if [[ -d "${ROOT}/iso/overlay/airootfs" ]]; then
+  mkdir -p "${PROFILE}/airootfs"
+  cp -a "${ROOT}/iso/overlay/airootfs/." "${PROFILE}/airootfs/"
+fi
+if [[ -f "${ROOT}/iso/overlay/profiledef.sh" ]]; then
+  # Replace name/label fields but keep bootmodes from our overlay file
+  # (overlay profiledef is complete for our product name)
+  cp -a "${ROOT}/iso/overlay/profiledef.sh" "${PROFILE}/profiledef.sh"
+fi
+
+# Append extra packages
+if [[ -f "${ROOT}/iso/overlay/packages.x86_64.add" ]]; then
+  log "appending packages.x86_64.add"
+  {
+    echo
+    echo "# --- arch-rails-server extras ---"
+    grep -v '^\s*#' "${ROOT}/iso/overlay/packages.x86_64.add" | grep -v '^\s*$' || true
+  } >>"${PROFILE}/packages.x86_64"
+  # Deduplicate while preserving order
+  awk 'NF && !seen[$0]++' "${PROFILE}/packages.x86_64" >"${PROFILE}/packages.x86_64.dedup"
+  mv "${PROFILE}/packages.x86_64.dedup" "${PROFILE}/packages.x86_64"
+fi
+
+# Ensure executable bits on live helpers
+chmod 755 "${PROFILE}/airootfs/usr/local/bin/ars" 2>/dev/null || true
+chmod 755 "${PROFILE}/airootfs/usr/local/bin/ars-copy-to-target" 2>/dev/null || true
+
+# --- stage kit into airootfs ---
+KIT_DEST="${PROFILE}/airootfs/opt/arch-rails-server"
+log "staging repo -> ${KIT_DEST}"
+mkdir -p "${KIT_DEST}"
+if command -v rsync >/dev/null 2>&1; then
+  rsync -a \
+    --exclude '.git/' \
+    --exclude 'work/' \
+    --exclude 'out/' \
+    --exclude 'iso/secrets/' \
+    --exclude 'config/defaults.env' \
+    --exclude 'config/authorized_keys' \
+    --exclude 'archinstall/user_credentials.json' \
+    --exclude 'archinstall/user_disk_layout.json' \
+    --exclude 'archinstall/user_configuration.json' \
+    "${ROOT}/" "${KIT_DEST}/"
+else
+  # Fallback: tar pipe
+  tar -C "${ROOT}" \
+    --exclude '.git' \
+    --exclude 'work' \
+    --exclude 'out' \
+    --exclude 'iso/secrets' \
+    -cf - . | tar -C "${KIT_DEST}" -xf -
+fi
+
+# VERSION stamp
+{
+  echo "arch-rails-server live kit"
+  echo "built_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  echo "git_commit=$(git -C "${ROOT}" rev-parse --short HEAD 2>/dev/null || echo unknown)"
+  echo "git_describe=$(git -C "${ROOT}" describe --always --dirty 2>/dev/null || echo unknown)"
+} >"${KIT_DEST}/VERSION"
+
+# Bake optional secrets
+if [[ -f "${ROOT}/iso/secrets/authorized_keys" ]]; then
+  log "baking iso/secrets/authorized_keys into kit"
+  install -m 0644 "${ROOT}/iso/secrets/authorized_keys" "${KIT_DEST}/config/authorized_keys"
+else
+  log "no iso/secrets/authorized_keys (operator can add keys on live system)"
+fi
+if [[ -f "${ROOT}/iso/secrets/defaults.env" ]]; then
+  log "baking iso/secrets/defaults.env into kit"
+  install -m 0644 "${ROOT}/iso/secrets/defaults.env" "${KIT_DEST}/config/defaults.env"
+fi
+
+# Fix permissions on staged bin scripts
+find "${KIT_DEST}/bin" "${KIT_DEST}/bootstrap" "${KIT_DEST}/scripts" \
+  -type f \( -name '*.sh' -o -path '*/bin/*' \) -exec chmod 755 {} + 2>/dev/null || true
+chmod 755 "${KIT_DEST}/bin/"* 2>/dev/null || true
+
+# --- mkarchiso ---
+BUILD_DIR="${WORK}/build"
+rm -rf "${BUILD_DIR}"
+mkdir -p "${BUILD_DIR}"
+log "mkarchiso -v -w ${BUILD_DIR} -o ${OUT} ${PROFILE}"
+mkarchiso -v -w "${BUILD_DIR}" -o "${OUT}" "${PROFILE}"
+
+# Prefer a stable symlink to newest ISO
+shopt -s nullglob
+isos=("${OUT}"/arch-rails-server-*.iso "${OUT}"/*.iso)
+shopt -u nullglob
+if [[ ${#isos[@]} -gt 0 ]]; then
+  # newest by mtime
+  newest="$(ls -t "${isos[@]}" | head -1)"
+  ln -sfn "$(basename "${newest}")" "${OUT}/arch-rails-server-latest.iso"
+  log "ISO: ${newest}"
+  log "link: ${OUT}/arch-rails-server-latest.iso -> $(basename "${newest}")"
+  ls -lh "${newest}"
+else
+  warn_msg="mkarchiso finished but no ISO found in ${OUT}"
+  printf 'warning: %s\n' "${warn_msg}" >&2
+  ls -la "${OUT}" || true
+fi
+
+if [[ "${KEEP_WORK}" -eq 0 ]]; then
+  log "removing work tree ${WORK} (pass --keep-work to retain)"
+  rm -rf "${WORK}"
+fi
+
+log "done. Write to USB with: sudo ./bin/make-usb /dev/sdX --i-know-this-wipes-the-device"

@@ -1,0 +1,21 @@
+========================================================================
+ arch-rails-server live media
+ Kamal-ready Arch host installer kit
+========================================================================
+
+  Kit path:  /opt/arch-rails-server
+  Helper:    ars help
+
+  Typical flow:
+    1. ars status          # network + kit present?
+    2. ars keys            # optional: bake-in check for authorized_keys
+    3. archinstall         # or: ars archinstall
+    4. After install, before reboot:
+         ars copy-to-target
+         arch-chroot /mnt /opt/arch-rails-server/bin/bootstrap
+    5. reboot → ./bin/verify on the new host
+
+  Docs on this media:  less /opt/arch-rails-server/docs/INSTALL.md
+                       less /opt/arch-rails-server/docs/USB.md
+
+========================================================================

@@ -1,0 +1,8 @@
+# Extra packages appended to releng packages.x86_64 when building the ISO.
+# One package per line. Comments and blank lines ignored.
+# Keep the live image lean — Docker is installed on the *target* by bootstrap,
+# not required in the live environment.
+git
+jq
+rsync
+nftables
