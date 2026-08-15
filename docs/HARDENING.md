@@ -6,7 +6,7 @@ Bootstrap applies a **practical** baseline for a single-tenant Kamal host. It is
 
 | Control | Mechanism |
 |---------|-----------|
-| SSH keys | `config/authorized_keys` → deploy (and optional root) |
+| SSH keys | `config/authorized_keys` → operator (if set), deploy, and optional root |
 | Password SSH | Off via sshd drop-in |
 | Root SSH | `prohibit-password` (keys only) |
 | Host INPUT | nftables table `arch_rails_server` — allow 22/80/443 |

@@ -27,8 +27,9 @@ iso/secrets/ (optional keys)
 | Component | Location on live media |
 |-----------|------------------------|
 | Kit | `/opt/arch-rails-server` |
-| Helper | `ars help` |
-| MOTD | login banner with steps |
+| Walkthrough | `less ~/README` (same file as `docs/LIVE.md`) |
+| Helper | `ars help` / `ars readme` |
+| MOTD | login banner pointing at `~/README` |
 
 ## Build host setup
 
@@ -60,7 +61,7 @@ sudo ./bin/build-iso
 
 `mkarchiso` always needs root **somewhere** (host or container).
 
-Optional: bake SSH public keys into the image so bootstrap can harden SSH without a network clone:
+Optional: bake SSH public keys into the image so bootstrap can harden SSH without a network clone. Same directory can hold a Phototherapy-style `wifi.yaml` so the live image AutoConnects to known SSIDs (`iwd`):
 
 ```bash
 mkdir -p iso/secrets
@@ -68,9 +69,16 @@ cp iso/secrets.example/authorized_keys.example iso/secrets/authorized_keys
 $EDITOR iso/secrets/authorized_keys   # real public keys only
 # optional:
 # cp config/defaults.env.example iso/secrets/defaults.env
+# Household Wi-Fi (same file as Phototherapy_Timer; gitignored):
+cp ~/UserHackable/Phototherapy_Timer/secrets/wifi.yaml iso/secrets/wifi.yaml
+# Personal admin + keys for ars install:
+cp iso/secrets.example/authorized_keys.example iso/secrets/authorized_keys
+# paste your ed25519 public key
+cp config/defaults.env.example iso/secrets/defaults.env
+# set OPERATOR_USER=rob (or your login)
 ```
 
-`iso/secrets/` is gitignored.
+`iso/secrets/` is gitignored. `wifi.yaml` becomes `/var/lib/iwd/*.psk` on the **live** image only (not copied onto the installed host). Wired DHCP still comes up on its own when a cable has link; ethernet is preferred over Wi-Fi.
 
 ## Build the ISO
 
@@ -136,14 +144,15 @@ sudo ./bin/make-usb /dev/sdX --i-know-this-wipes-the-device --dry-run
 
 1. Boot from USB (UEFI preferred; Secure Boot may need to be disabled depending on firmware).
 2. Log in as `root` (Arch live default; empty password on stock releng — follow current Arch live docs).
-3. Confirm kit and network:
+3. Read the on-console walkthrough: `less ~/README` (also `ars readme`).
+4. Preferred: `ars install` (hostname + disk, then unattended). Or confirm kit and network:
 
    ```bash
    ars status
    ars keys
    ```
 
-4. Install the base system:
+5. Install the base system:
 
    ```bash
    archinstall
@@ -152,7 +161,7 @@ sudo ./bin/make-usb /dev/sdX --i-know-this-wipes-the-device --dry-run
 
    Use answers aligned with `archinstall/user_configuration.sample.json`. **Confirm the disk carefully.**
 
-5. When archinstall finishes and the new root is still mounted at `/mnt` (or remount it):
+6. When archinstall finishes and the new root is still mounted at `/mnt` (or remount it):
 
    ```bash
    ars copy-to-target
@@ -161,13 +170,13 @@ sudo ./bin/make-usb /dev/sdX --i-know-this-wipes-the-device --dry-run
 
    That copies the kit to `/opt/arch-rails-server` on the new system and runs the Kamal/Docker bootstrap inside `arch-chroot`.
 
-6. Reboot, remove the USB, SSH in as `deploy` (or root with keys), run:
+7. Reboot, remove the USB, SSH in as `deploy` (or root with keys), run:
 
    ```bash
    /opt/arch-rails-server/bin/verify
    ```
 
-7. Point your Rails app’s Kamal `config/deploy.yml` at the host ([KAMAL.md](KAMAL.md)).
+8. Point your Rails app’s Kamal `config/deploy.yml` at the host ([KAMAL.md](KAMAL.md)).
 
 ## Without baking keys
 
@@ -200,7 +209,7 @@ There is no persistent “data partition” in the default hybrid ISO layout; th
 | `mkarchiso` permission errors | run `build-iso` with `sudo` |
 | USB not bootable | UEFI vs BIOS mode; try another stick; verify `dd` finished (`sync`) |
 | `make-usb` refuses device | use whole disk; unmount; check `RM`/`TRAN` with `lsblk` |
-| No network in live | `iwctl` or NetworkManager; then retry |
+| No network in live | Cable: wait for DHCP (`ars status`). Wi-Fi: bake `iso/secrets/wifi.yaml` before build, or `iwctl` then retry |
 | Locked out after bootstrap | console/IPMI; ensure keys were in `authorized_keys` before bootstrap |
 
 ## Size and contents
@@ -210,5 +219,6 @@ The image is based on official Arch **releng** (installer live) plus:
 - Extra packages: `git`, `jq`, `rsync`, `nftables` (see `iso/overlay/packages.x86_64.add`)
 - Full kit under `/opt/arch-rails-server` (repo without `.git` / build artifacts)
 - `ars` / `ars-copy-to-target` helpers
+- Optional iwd AutoConnect profiles from `iso/secrets/wifi.yaml`
 
 Docker is **not** preinstalled on the live ISO; `bootstrap` installs it on the target host.

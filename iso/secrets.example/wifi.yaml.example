@@ -1,0 +1,17 @@
+# Copy to iso/secrets/wifi.yaml (gitignored) — same shape as
+# ~/UserHackable/Phototherapy_Timer/secrets/wifi.yaml
+#
+# Each ssid becomes an iwd AutoConnect profile on the live image.
+# Wired DHCP still wins when a cable has link (lower route metric).
+#
+# ---
+# - ssid: Ferney
+#   password: "your-passphrase"
+# - ssid: FamilyGuy
+#   password: "other-passphrase"
+
+---
+- ssid: ExampleHome
+  password: "change-me"
+- ssid: ExampleGuest
+  password: "change-me-too"

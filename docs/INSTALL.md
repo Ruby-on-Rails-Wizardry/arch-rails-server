@@ -15,12 +15,12 @@ End-to-end path from empty machine to Kamal-ready Arch host.
 
 ### Option A — arch-rails-server USB (recommended)
 
-See [USB.md](USB.md). After boot:
+See [USB.md](USB.md). After boot, `less ~/README` (same text as [LIVE.md](LIVE.md)):
 
 ```bash
-ars status
-archinstall
-ars copy-to-target && ars bootstrap-target
+ars install
+# or the longer path:
+# ars status && archinstall && ars copy-to-target && ars bootstrap-target
 # then reboot and continue from "6. Point a Rails app" below
 ```
 
@@ -29,7 +29,7 @@ ars copy-to-target && ars bootstrap-target
 1. Download the latest ISO from <https://archlinux.org/download/>.
 2. Write it to USB (`dd`, `balenaEtcher`, `ddrescue`, …).
 3. Boot the new server from that media (UEFI recommended).
-4. If wired network is up: `ping -c1 archlinux.org`.
+4. If wired network is up: `ping -c1 archlinux.org`. On the custom USB, `ars status` also reports baked iwd SSIDs; join by hand with `iwctl` if none were baked.
 
 ## 2. Base install with archinstall
 

@@ -40,11 +40,23 @@ else
   fail "net.ipv4.ip_forward is not 1"
 fi
 
-# At least one of root or deploy should have authorized_keys if hardening was applied
-if [[ -s /root/.ssh/authorized_keys ]] || [[ -s /home/deploy/.ssh/authorized_keys ]]; then
-  pass "authorized_keys present for root and/or deploy"
+# At least one of root, deploy, or OPERATOR_USER should have authorized_keys
+keys_ok=0
+[[ -s /root/.ssh/authorized_keys ]] && keys_ok=1
+[[ -s /home/deploy/.ssh/authorized_keys ]] && keys_ok=1
+if [[ -f /opt/arch-rails-server/config/defaults.env ]]; then
+  # shellcheck disable=SC1091
+  set -a
+  source /opt/arch-rails-server/config/defaults.env
+  set +a
+fi
+if [[ -n "${OPERATOR_USER:-}" && -s "/home/${OPERATOR_USER}/.ssh/authorized_keys" ]]; then
+  keys_ok=1
+fi
+if [[ "${keys_ok}" -eq 1 ]]; then
+  pass "authorized_keys present for root, deploy, and/or operator"
 else
-  fail "no authorized_keys for root or deploy — Kamal SSH will fail without keys"
+  fail "no authorized_keys for root, deploy, or operator — SSH/Kamal will fail without keys"
 fi
 
 # Free disk on /

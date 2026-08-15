@@ -79,6 +79,7 @@ unsquashfs -d "${WORK}/squash" -f "${SFS_FILE}" \
   usr/local/bin/ars \
   usr/local/bin/ars-copy-to-target \
   etc/motd \
+  root/README \
   2>&1 | tail -30
 
 KIT="${WORK}/squash/opt/arch-rails-server"
@@ -86,10 +87,20 @@ KIT="${WORK}/squash/opt/arch-rails-server"
 [[ -f "${KIT}/bin/bootstrap" ]] && pass "kit bin/bootstrap" || fail "kit bin/bootstrap"
 [[ -f "${KIT}/bin/verify" ]] && pass "kit bin/verify" || fail "kit bin/verify"
 [[ -f "${WORK}/squash/usr/local/bin/ars" ]] && pass "usr/local/bin/ars" || fail "usr/local/bin/ars"
-if [[ -f "${WORK}/squash/etc/motd" ]] && grep -q 'arch-rails-server' "${WORK}/squash/etc/motd"; then
-  pass "motd mentions arch-rails-server"
+if [[ -f "${WORK}/squash/etc/motd" ]] && grep -q 'less ~/README' "${WORK}/squash/etc/motd"; then
+  pass "motd points at ~/README"
 else
-  fail "motd missing kit banner"
+  fail "motd missing ~/README pointer"
+fi
+if [[ -e "${WORK}/squash/root/README" ]]; then
+  pass "root/README present"
+else
+  fail "root/README missing"
+fi
+if [[ -f "${KIT}/docs/LIVE.md" ]] && grep -q 'ars bootstrap-target' "${KIT}/docs/LIVE.md"; then
+  pass "docs/LIVE.md walkthrough"
+else
+  fail "docs/LIVE.md missing or incomplete"
 fi
 if [[ -f "${KIT}/VERSION" ]]; then
   pass "VERSION: $(tr '\n' ' ' <"${KIT}/VERSION")"
@@ -97,6 +108,12 @@ else
   fail "VERSION stamp missing"
 fi
 [[ -f "${KIT}/docs/USB.md" ]] && pass "docs/USB.md" || fail "docs/USB.md missing"
+[[ -x "${KIT}/bin/live-install" || -f "${KIT}/bin/live-install" ]] && pass "kit bin/live-install" || fail "kit bin/live-install"
+if [[ -f "${KIT}/docs/LIVE.md" ]] && grep -q 'ars install' "${KIT}/docs/LIVE.md"; then
+  pass "docs/LIVE.md mentions ars install"
+else
+  fail "docs/LIVE.md missing ars install"
+fi
 [[ -f "${KIT}/bootstrap/bootstrap.sh" ]] && pass "bootstrap/bootstrap.sh" || fail "bootstrap missing"
 
 # Serial console boot options in ISO (not inside squashfs)

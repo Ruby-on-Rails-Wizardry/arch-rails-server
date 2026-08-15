@@ -8,15 +8,20 @@ usage() {
   cat <<'EOF'
 ars — arch-rails-server live helper
 
+Automated install:    ars install
+Walkthrough:          less ~/README   (or: ars readme)
+
 Usage:
   ars help              This text
+  ars install           Automated UEFI install (hostname + disk, then hands-off)
+  ars readme            Live install walkthrough (same as less ~/README)
   ars path              Print kit root
   ars status            Network, kit, secrets summary
   ars keys              Show whether authorized_keys is staged
   ars archinstall       cd to kit archinstall/ and print suggested command
   ars copy-to-target    Copy kit into installed system at /mnt (pre-reboot)
   ars bootstrap-target  arch-chroot /mnt and run bin/bootstrap (needs /mnt)
-  ars docs [name]       less a doc (INSTALL, USB, KAMAL, HARDENING)
+  ars docs [name]       less a doc (LIVE, INSTALL, USB, KAMAL, HARDENING)
 
 Environment:
   ARS_ROOT   Kit path (default /opt/arch-rails-server)
@@ -47,10 +52,49 @@ cmd_status() {
     echo "network: no ping to archlinux.org (configure networking first)"
   fi
 
+  local iwd_dir="/var/lib/iwd"
+  if [[ -d "${iwd_dir}" ]]; then
+    local profiles=() f base ssid
+    shopt -s nullglob
+    for f in "${iwd_dir}"/*.psk "${iwd_dir}"/*.open; do
+      [[ -f "${f}" ]] || continue
+      base="$(basename "${f}")"
+      base="${base%.psk}"
+      base="${base%.open}"
+      if [[ "${base}" == =* ]]; then
+        local hex="${base#=}" i
+        ssid=""
+        for ((i = 0; i < ${#hex}; i += 2)); do
+          ssid+="\\x${hex:i:2}"
+        done
+        ssid="$(printf '%b' "${ssid}")"
+      else
+        ssid="${base}"
+      fi
+      profiles+=("${ssid}")
+    done
+    shopt -u nullglob
+    if [[ ${#profiles[@]} -gt 0 ]]; then
+      echo "wifi: iwd AutoConnect (${profiles[*]})"
+    else
+      echo "wifi: no baked iwd profiles (iwctl to join)"
+    fi
+  else
+    echo "wifi: iwd dir missing"
+  fi
+
+  if [[ -f "${ARS_ROOT}/config/defaults.env" ]]; then
+    # shellcheck disable=SC1091
+    set -a
+    source "${ARS_ROOT}/config/defaults.env"
+    set +a
+  fi
+  echo "operator: ${OPERATOR_USER:-none}   deploy: ${DEPLOY_USER:-deploy}"
+
   if [[ -f "${ARS_ROOT}/config/authorized_keys" ]]; then
     local n
     n=$(grep -cve '^\s*$' -e '^#' "${ARS_ROOT}/config/authorized_keys" || true)
-    echo "authorized_keys: ${n} key line(s)"
+    echo "authorized_keys: ${n} key line(s) → ${OPERATOR_USER:+${OPERATOR_USER} + }${DEPLOY_USER:-deploy} + root"
   else
     echo "authorized_keys: not staged (copy into iso/secrets/ before build-iso, or edit on live system)"
   fi
@@ -114,8 +158,19 @@ cmd_bootstrap_target() {
   arch-chroot "${mnt}" /opt/arch-rails-server/bin/bootstrap
 }
 
+cmd_readme() {
+  local f
+  for f in "${HOME}/README" /root/README "${ARS_ROOT}/docs/LIVE.md"; do
+    if [[ -e "${f}" ]]; then
+      less -R "${f}"
+      return
+    fi
+  done
+  die "live README not found (expected ${ARS_ROOT}/docs/LIVE.md)"
+}
+
 cmd_docs() {
-  local name="${1:-INSTALL}"
+  local name="${1:-LIVE}"
   name="${name%.md}"
   local f="${ARS_ROOT}/docs/${name}.md"
   [[ -f "${f}" ]] || f="${ARS_ROOT}/docs/${name^^}.md"
@@ -128,6 +183,8 @@ main() {
   shift || true
   case "${cmd}" in
     help|-h|--help) usage ;;
+    install) exec "${ARS_ROOT}/bin/live-install" "$@" ;;
+    readme|guide|live) cmd_readme ;;
     path) cmd_path ;;
     status) cmd_status ;;
     keys) cmd_keys ;;

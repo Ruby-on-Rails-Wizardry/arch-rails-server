@@ -4,6 +4,7 @@ This directory customizes the official **archiso `releng`** profile so a single 
 
 - A normal Arch live environment (`archinstall`, networking, disk tools)
 - This repo at **`/opt/arch-rails-server`**
+- Console walkthrough at **`~/README`** (`docs/LIVE.md`)
 - Live helpers: **`ars`** (see `overlay/airootfs/usr/local/bin/ars`)
 
 ## Build machine requirements
@@ -32,7 +33,7 @@ Details: [docs/USB.md](../docs/USB.md).
 | Path | Purpose |
 |------|---------|
 | [overlay/](overlay/) | Merged into a copy of `/usr/share/archiso/configs/releng` |
-| [secrets/](secrets/) | Optional **local** keys/env baked into the image at build time (gitignored) |
-| [secrets.example/](secrets.example/) | Templates for `iso/secrets/` |
+| [secrets/](secrets/) | Optional **local** keys/env/wifi baked into the image at build time (gitignored) |
+| [secrets.example/](secrets.example/) | Templates for `iso/secrets/` (`authorized_keys`, `defaults.env`, `wifi.yaml`) |
 
 Do not commit real keys under `iso/secrets/`.

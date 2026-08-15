@@ -27,8 +27,9 @@ On an Arch build machine:
 
 ```bash
 # one-time packages: docker, qemu-system-x86, edk2-ovmf (see docs/USB.md)
-# optional: bake SSH public keys
+# optional: bake SSH public keys and/or household Wi-Fi (Phototherapy wifi.yaml)
 mkdir -p iso/secrets && $EDITOR iso/secrets/authorized_keys
+# cp ~/UserHackable/Phototherapy_Timer/secrets/wifi.yaml iso/secrets/wifi.yaml
 
 ./bin/build-iso-docker          # no host sudo
 ./bin/test-vm                   # QEMU smoke
@@ -36,7 +37,7 @@ lsblk   # find the USB whole-disk device, e.g. /dev/sdb
 sudo ./bin/make-usb /dev/sdX --i-know-this-wipes-the-device
 ```
 
-On the new server: boot the stick → `ars status` → `archinstall` → `ars copy-to-target` → `ars bootstrap-target` → reboot → Kamal deploy.
+On the new server: boot the stick → `ars install` (hostname + disk) → reboot → Kamal deploy. Walkthrough: `less ~/README`.
 
 Full detail: **[docs/USB.md](docs/USB.md)**.
 
@@ -80,7 +81,7 @@ bootstrap/       # post-install modules
 config/          # env, sshd drop-in, nftables, sysctl
 iso/             # archiso overlay + optional secrets for live media
 bin/             # bootstrap, verify, doctor, build-iso, make-usb, …
-docs/            # INSTALL, USB, KAMAL, HARDENING, RELEASE
+docs/            # LIVE (console walkthrough), INSTALL, USB, KAMAL, HARDENING, RELEASE
 out/             # built ISOs (gitignored)
 ```
 

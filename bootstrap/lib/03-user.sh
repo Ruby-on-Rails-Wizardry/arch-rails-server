@@ -38,9 +38,38 @@ module_user() {
 
   install_authorized_keys_for "${DEPLOY_USER}"
 
+  if [[ -n "${OPERATOR_USER}" && "${OPERATOR_USER}" != "${DEPLOY_USER}" ]]; then
+    [[ "${OPERATOR_USER}" =~ ^[a-z_][a-z0-9_-]*$ ]] || die "invalid OPERATOR_USER: ${OPERATOR_USER}"
+    ensure_operator_user
+    install_authorized_keys_for "${OPERATOR_USER}"
+  fi
+
   if [[ "${INSTALL_ROOT_AUTHORIZED_KEYS}" == "1" ]]; then
     install_authorized_keys_for root
   fi
+}
+
+ensure_operator_user() {
+  if ! id -u "${OPERATOR_USER}" >/dev/null 2>&1; then
+    useradd -m -s /bin/bash -G wheel "${OPERATOR_USER}"
+    log "created user ${OPERATOR_USER}"
+  else
+    usermod -aG wheel "${OPERATOR_USER}" 2>/dev/null || true
+    log "user ${OPERATOR_USER} already exists"
+  fi
+
+  local dest=/etc/sudoers.d/99-arch-rails-server-operator
+  cat >"${dest}" <<EOF
+# Personal admin created by arch-rails-server bootstrap. SSH is key-only.
+Defaults:${OPERATOR_USER} !requiretty
+${OPERATOR_USER} ALL=(ALL:ALL) NOPASSWD: ALL
+EOF
+  chmod 0440 "${dest}"
+  if ! visudo -cf "${dest}" >/dev/null; then
+    rm -f "${dest}"
+    die "sudoers validation failed for ${OPERATOR_USER}; removed drop-in"
+  fi
+  log "sudoers installed for ${OPERATOR_USER}"
 }
 
 install_authorized_keys_for() {

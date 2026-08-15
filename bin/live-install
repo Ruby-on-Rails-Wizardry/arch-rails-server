@@ -1,0 +1,217 @@
+#!/usr/bin/env bash
+# Live-media automated install: hostname + disk confirm, then archinstall + bootstrap.
+set -euo pipefail
+
+ARS_ROOT="${ARS_ROOT:-/opt/arch-rails-server}"
+MNT="${MNT:-/mnt}"
+WORK="${ARS_INSTALL_WORK:-/tmp/ars-install}"
+DRY_RUN=0
+
+usage() {
+  cat <<'EOF'
+Usage: ars install [--dry-run]
+
+Automated UEFI install on the live media. Prompts for hostname (unless set)
+and which disk to wipe, then:
+
+  1. generates archinstall JSON
+  2. runs archinstall --silent
+  3. copies the kit and runs bootstrap
+
+Environment (also loaded from config/defaults.env):
+  HOSTNAME          Skip prompt when set and ASK_HOSTNAME=0
+  ASK_HOSTNAME      1 = always ask (default if HOSTNAME is empty)
+  TIMEZONE          Default UTC
+  OPERATOR_USER     Personal admin account (e.g. rob)
+  DEPLOY_USER       Kamal user (default deploy)
+  ARS_DISK          Pre-select disk (still requires wipe confirmation)
+  ARS_I_KNOW_THIS_WIPES_THE_DISK=1
+                    Skip the YES prompt (needs ARS_DISK)
+EOF
+}
+
+log() { printf '==> %s\n' "$*"; }
+die() { printf 'error: %s\n' "$*" >&2; exit 1; }
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -h|--help) usage; exit 0 ;;
+    --dry-run) DRY_RUN=1; shift ;;
+    *) die "unknown option: $1" ;;
+  esac
+done
+
+[[ -d "${ARS_ROOT}" ]] || die "kit missing at ${ARS_ROOT}"
+# shellcheck source=/dev/null
+if [[ -f "${ARS_ROOT}/config/defaults.env" ]]; then
+  set -a
+  source "${ARS_ROOT}/config/defaults.env"
+  set +a
+fi
+: "${DEPLOY_USER:=deploy}"
+: "${OPERATOR_USER:=}"
+: "${HOSTNAME:=}"
+: "${ASK_HOSTNAME:=1}"
+: "${TIMEZONE:=UTC}"
+if [[ -n "${OPERATOR_USER}" ]]; then
+  [[ "${OPERATOR_USER}" =~ ^[a-z_][a-z0-9_-]*$ ]] || die "invalid OPERATOR_USER: ${OPERATOR_USER}"
+fi
+
+[[ -d /sys/firmware/efi ]] || die "UEFI required for ars install (use guided archinstall on BIOS)"
+command -v archinstall >/dev/null 2>&1 || die "archinstall not found"
+command -v python3 >/dev/null 2>&1 || die "python3 not found"
+command -v openssl >/dev/null 2>&1 || die "openssl not found"
+
+KEYS="${ARS_ROOT}/config/authorized_keys"
+if [[ ! -f "${KEYS}" ]] || ! grep -qvE '^\s*(#|$)' "${KEYS}"; then
+  die "no SSH public keys in ${KEYS}
+Put them in iso/secrets/authorized_keys before building the ISO, or:
+  nano ${KEYS}"
+fi
+
+if ! ping -c1 -W3 archlinux.org >/dev/null 2>&1; then
+  die "no network (archlinux.org). Fix DHCP/Wi-Fi, then retry. See: less ~/README"
+fi
+
+iso_disk() {
+  local src parent
+  src="$(findmnt -no SOURCE /run/archiso/bootmnt 2>/dev/null || true)"
+  [[ -n "${src}" ]] || return 0
+  src="$(readlink -f "${src}" 2>/dev/null || printf '%s' "${src}")"
+  parent="$(lsblk -dno PKNAME "${src}" 2>/dev/null | tail -n1 || true)"
+  if [[ -n "${parent}" ]]; then
+    printf '/dev/%s\n' "${parent}"
+  fi
+}
+
+list_candidate_disks() {
+  local skip device tran
+  skip="$(iso_disk || true)"
+  while read -r device; do
+    [[ -n "${device}" ]] || continue
+    [[ "${device}" == "${skip}" ]] && continue
+    tran="$(lsblk -dno TRAN "${device}" 2>/dev/null || true)"
+    [[ "${tran}" == "usb" ]] && continue
+    printf '%s\n' "${device}"
+  done < <(lsblk -dpno NAME,TYPE | awk '$2=="disk"{print $1}')
+}
+
+prompt_hostname() {
+  local current="${HOSTNAME}"
+  if [[ -n "${current}" && "${ASK_HOSTNAME}" != "1" ]]; then
+    printf '%s\n' "${current}"
+    return
+  fi
+  local hint="${current:-rails-host}"
+  local answer=""
+  read -r -p "Hostname [${hint}]: " answer || true
+  answer="${answer:-${hint}}"
+  if [[ ! "${answer}" =~ ^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?$ ]]; then
+    die "invalid hostname: ${answer}"
+  fi
+  printf '%s\n' "${answer}"
+}
+
+prompt_disk() {
+  local disk="${ARS_DISK:-}"
+  if [[ -n "${disk}" ]]; then
+    [[ -b "${disk}" ]] || die "ARS_DISK is not a block device: ${disk}"
+    printf '%s\n' "${disk}"
+    return
+  fi
+
+  echo
+  echo "Install disks (USB install media hidden):"
+  local d
+  local disks=()
+  while IFS= read -r d; do
+    disks+=("${d}")
+    lsblk -dno NAME,SIZE,MODEL,TRAN "${d}" | sed 's/^/  /'
+  done < <(list_candidate_disks)
+
+  [[ ${#disks[@]} -gt 0 ]] || die "no candidate disks found"
+  echo
+  read -r -p "Disk to WIPE (full path, e.g. ${disks[0]}): " disk
+  [[ -n "${disk}" ]] || die "no disk entered"
+  [[ -b "${disk}" ]] || die "not a block device: ${disk}"
+  printf '%s\n' "${disk}"
+}
+
+confirm_wipe() {
+  local disk="$1"
+  echo
+  echo "This will ERASE ALL DATA on ${disk}:"
+  lsblk -o NAME,SIZE,TYPE,FSTYPE,MOUNTPOINT "${disk}" || true
+  echo
+  if [[ "${ARS_I_KNOW_THIS_WIPES_THE_DISK:-}" == "1" && -n "${ARS_DISK:-}" ]]; then
+    log "ARS_I_KNOW_THIS_WIPES_THE_DISK=1 — skipping YES prompt"
+    return
+  fi
+  local ans=""
+  read -r -p "Type YES to wipe ${disk}: " ans
+  [[ "${ans}" == "YES" ]] || die "aborted (did not type YES)"
+}
+
+HOSTNAME="$(prompt_hostname)"
+DISK="$(prompt_disk)"
+confirm_wipe "${DISK}"
+
+DISK_BYTES="$(lsblk -bdno SIZE "${DISK}")"
+[[ -n "${DISK_BYTES}" ]] || die "could not read size of ${DISK}"
+
+PASS="$(openssl rand -base64 24)"
+PASS_HASH="$(printf '%s' "${PASS}" | openssl passwd -6 -stdin)"
+
+rm -rf "${WORK}"
+mkdir -p "${WORK}"
+chmod 700 "${WORK}"
+
+log "generating archinstall config (hostname=${HOSTNAME} disk=${DISK})"
+python3 "${ARS_ROOT}/scripts/generate-archinstall-config.py" \
+  --disk "${DISK}" \
+  --disk-size-bytes "${DISK_BYTES}" \
+  --hostname "${HOSTNAME}" \
+  --timezone "${TIMEZONE}" \
+  --operator "${OPERATOR_USER}" \
+  --deploy "${DEPLOY_USER}" \
+  --password-hash "${PASS_HASH}" \
+  --out-dir "${WORK}"
+
+if [[ "${DRY_RUN}" -eq 1 ]]; then
+  log "dry-run: not running archinstall"
+  echo "config: ${WORK}/user_configuration.json"
+  echo "creds:  ${WORK}/user_credentials.json"
+  echo "users:  ${OPERATOR_USER:+${OPERATOR_USER} }${DEPLOY_USER} + root (keys after bootstrap)"
+  exit 0
+fi
+
+log "running archinstall --silent (this takes a while)"
+archinstall \
+  --config "${WORK}/user_configuration.json" \
+  --creds "${WORK}/user_credentials.json" \
+  --silent
+
+[[ -d "${MNT}/etc" ]] || die "archinstall finished but ${MNT}/etc is missing"
+
+log "copying kit + bootstrap"
+if command -v ars >/dev/null 2>&1; then
+  MNT="${MNT}" ARS_ROOT="${ARS_ROOT}" ars copy-to-target
+  MNT="${MNT}" ARS_ROOT="${ARS_ROOT}" ars bootstrap-target
+else
+  "${ARS_ROOT}/iso/overlay/airootfs/usr/local/bin/ars-copy-to-target"
+  arch-chroot "${MNT}" /opt/arch-rails-server/bin/bootstrap
+fi
+
+echo
+echo "Install finished."
+echo "  hostname: ${HOSTNAME}"
+echo "  users:    ${OPERATOR_USER:+${OPERATOR_USER} (admin) }${DEPLOY_USER} (Kamal)  root"
+echo "  SSH:      keys from config/authorized_keys (password SSH is off)"
+echo
+echo "Console password for ${OPERATOR_USER:+${OPERATOR_USER}, }${DEPLOY_USER}, and root"
+echo "(local TTY only; not used for SSH):"
+echo "  ${PASS}"
+echo
+echo "Reboot, remove the USB, then:"
+echo "  ssh ${OPERATOR_USER:-${DEPLOY_USER}}@${HOSTNAME}"
+echo "  /opt/arch-rails-server/bin/verify"

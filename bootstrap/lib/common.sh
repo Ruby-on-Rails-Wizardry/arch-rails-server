@@ -29,6 +29,10 @@ load_defaults() {
   fi
 
   : "${DEPLOY_USER:=deploy}"
+  : "${OPERATOR_USER:=}"
+  : "${HOSTNAME:=}"
+  : "${ASK_HOSTNAME:=1}"
+  : "${TIMEZONE:=UTC}"
   : "${INSTALL_ROOT_AUTHORIZED_KEYS:=1}"
   : "${SSH_PASSWORD_AUTHENTICATION:=no}"
   : "${SSH_PERMIT_ROOT_LOGIN:=prohibit-password}"

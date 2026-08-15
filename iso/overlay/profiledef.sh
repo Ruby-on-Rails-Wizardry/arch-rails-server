@@ -29,5 +29,7 @@ file_permissions=(
   ["/opt/arch-rails-server/bin/bootstrap"]="0:0:755"
   ["/opt/arch-rails-server/bin/doctor"]="0:0:755"
   ["/opt/arch-rails-server/bin/verify"]="0:0:755"
+  ["/opt/arch-rails-server/bin/live-install"]="0:0:755"
   ["/opt/arch-rails-server/bootstrap/bootstrap.sh"]="0:0:755"
+  ["/var/lib/iwd"]="0:0:700"
 )

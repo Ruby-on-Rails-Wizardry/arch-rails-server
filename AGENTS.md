@@ -32,6 +32,7 @@ Bare-metal **Arch** host for **Rails + Kamal + Docker**. Not a dev image (that i
 | `archinstall/` | Base install profile only |
 | `iso/overlay/` | Live ISO MOTD, `ars` helper, extra packages |
 | `bin/build-iso` / `bin/make-usb` | Media build/write safety and staging |
+| `docs/LIVE.md` | Console walkthrough (`~/README` on the live image) |
 | `docs/KAMAL.md` / `docs/USB.md` | When Kamal or media flow changes |
 | `CHANGELOG.md` | User-visible behavior |
 
@@ -41,6 +42,8 @@ Bare-metal **Arch** host for **Rails + Kamal + Docker**. Not a dev image (that i
 - Test with `./bin/verify-iso` and `./bin/test-vm` (no sudo; needs KVM + OVMF).
 - Never commit `iso/secrets/` or `out/` or `work/`.
 - Keep live package extras lean (`iso/overlay/packages.x86_64.add`); Docker belongs on the target via bootstrap.
+- Console install steps live in `docs/LIVE.md` and must stay accurate when the live flow changes (`~/README` is a symlink to that file).
+- `ars install` (`bin/live-install`) is the automated UEFI path: it still requires an explicit disk + `YES`. Do not default-wipe a disk.
 - `make-usb` must keep wipe safety rails (whole-disk only, explicit flag, refuse `/` disk).
 
 ## Verify before shipping

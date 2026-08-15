@@ -36,6 +36,7 @@ Rootless host path (Docker; user in docker group):
 Optional secrets (gitignored):
   iso/secrets/authorized_keys
   iso/secrets/defaults.env
+  iso/secrets/wifi.yaml     # Phototherapy-style SSID list → iwd AutoConnect
 EOF
 }
 
@@ -170,6 +171,16 @@ fi
 if [[ -f "${ROOT}/iso/secrets/defaults.env" ]]; then
   log "baking iso/secrets/defaults.env into kit"
   install -m 0644 "${ROOT}/iso/secrets/defaults.env" "${KIT_DEST}/config/defaults.env"
+fi
+
+# Live Wi-Fi only (airootfs /var/lib/iwd). Do not copy wifi.yaml into the kit —
+# ars copy-to-target would otherwise put passphrases on the installed host.
+WIFI_YAML="${ARS_WIFI_YAML:-${ROOT}/iso/secrets/wifi.yaml}"
+if [[ -f "${WIFI_YAML}" ]]; then
+  log "baking Wi-Fi AutoConnect profiles from ${WIFI_YAML} (SSIDs only logged)"
+  "${ROOT}/scripts/wifi-yaml-to-iwd.sh" "${WIFI_YAML}" "${PROFILE}/airootfs/var/lib/iwd"
+else
+  log "no iso/secrets/wifi.yaml (wired DHCP still automatic; Wi-Fi needs iwctl)"
 fi
 
 # Fix permissions on staged bin scripts
